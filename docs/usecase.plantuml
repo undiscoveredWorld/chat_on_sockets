@@ -1,0 +1,28 @@
+@startuml usecase
+
+actor Server
+actor Client
+
+(Listen port) as listen_port
+(Accept connections) as accept_connections
+(Handle messages) as handle_messages
+(Name connections) as name_connections
+(Sync messages with all connections) as sync_messages
+
+(Connect to server) as connect_to_server
+(Send message) as send_message
+(Output messages) as output_message
+
+Server -- listen_port
+Server -- accept_connections
+Server -- handle_messages
+accept_connections <.- name_connections : include
+handle_messages <.- sync_messages : include
+
+
+Client -- connect_to_server
+Client -- send_message
+Client -- output_message
+
+
+@enduml

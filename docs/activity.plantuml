@@ -1,0 +1,21 @@
+@startuml activity
+
+start
+:Initial socket;
+
+' Event loop
+while (True)
+    if (Have new connections) then(yes)
+        :Accept connection;
+        :Generate name for connection;
+        :Send messsage history;
+    endif
+    if (Have new messages) then(yes)
+        :Save message in history;
+        :Send all connections;
+    endif
+endwhile
+
+stop
+
+@enduml
