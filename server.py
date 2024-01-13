@@ -1,64 +1,122 @@
-import socket
+"""
+Server of chat.
+
+List of classes:
+    User
+    Message
+
+List of functions:
+    check_free_positions
+    get_user
+    send_message
+    send_message_history
+    event_loop
+
+List of constants:
+    PORT
+    COUNT_OF_CLIENTS
+
+List of variables:
+    users
+    message_history
+    server_socket
+"""
+
 import logging
-from selectors import DefaultSelector, EVENT_READ
+from dataclasses import dataclass
+from selectors import EVENT_READ, DefaultSelector
+from socket import socket
 from typing import Callable
 
+HOST: str = ''
+PORT: int = 9090
+COUNT_OF_CLIENTS: int = 4
+SERVER_SOCKET: socket = socket()
 
+_names_list: list[str] = ["John", "Jill", "Smith", "Bella"]
+users: list["User"] = []
+message_history: list["Message"] = []
+
+_selector = DefaultSelector()
+
+
+@dataclass
 class User:
-    client_socket: socket.socket
+    """
+    User stores information about connected user.
+
+    List of fields:
+        client_socket
+        name
+
+    List of methods:
+        del_self
+    """
+
+    client_socket: socket
     name: str
 
-    def __init__(self, client_socket: socket.socket):
+    def __init__(self, client_socket: socket):
+        """
+        Set all variables to arguments.
+
+        :param client_socket: client socket of user
+        """
         self.client_socket = client_socket
-        self.name = generate_name()
-
-    def del_self(self):
-        names_list.insert(0, self.name)
-        self.client_socket.close()
+        self.name = _generate_name()
 
 
+@dataclass
 class Message:
+    """
+    Message stores information about message.
+
+    List of fields:
+        body
+        sender
+    """
+
     body: str
     sender: User
 
-    def __init__(self, body: str, sender: User):
-        self.body = body
-        self.sender = sender
 
+@dataclass
+class _Handler:
+    """
+    _Handler stores information about handler.
 
-class Handler:
+    List of fields:
+        function
+        args
+    """
+
     function: Callable
     args: list
 
-    def __init__(self, function: Callable, args: list | None):
-        self.function = function
-        self.args = args or list()
-
-
-PORT: int = 9090
-COUNT_OF_CLIENTS: int = 4
-
-names_list: list[str] = ["John", "Jill", "Smith", "Bella"]
-users: list[User] = list()
-message_history: list[Message] = list()
-
-selector = DefaultSelector()
-server_socket: socket.socket = socket.socket()
-server_socket.bind(("", PORT))
-server_socket.listen(COUNT_OF_CLIENTS)
-
-logging.basicConfig(level=logging.INFO)
-
-logging.info("Server is listening on port {}".format(PORT))
-logging.info("Server can accept {} connections".format(COUNT_OF_CLIENTS))
-
 
 def check_free_positions() -> bool:
-    return len(names_list) != 0
+    """
+    Return true, if there are free positions, otherwise return false.
+
+    :return: true, if there are free positions, otherwise return false
+    """
+    return len(_names_list) != 0
 
 
-def accept_connection() -> None:
-    client_socket, _ = server_socket.accept()
+def _accept_connection() -> None:
+    """
+    Accept connection from client, send message history to it.
+
+    Side effects:
+        new user will append in users
+        client_socket will be register in selector
+
+    Error occur, when server is full. User will get message about it
+
+    :return:
+    """
+    client_socket: socket
+    client_socket, _ = SERVER_SOCKET.accept()
 
     if not check_free_positions():
         send_message(client_socket, "Server is full. You will disconnect\n")
@@ -66,63 +124,135 @@ def accept_connection() -> None:
         client_socket.close()
         return
 
-    users.append(User(client_socket))
-    logging.info("Accepted new connection. Places left: {}".format(len(names_list)))
-    logging.debug("{} connected".format(client_socket))
+    new_user = User(client_socket)
+    users.append(new_user)
+    logging.info("Accepted new connection. Places left: %d", len(_names_list))
+    logging.info("%s:%d connected", *client_socket.getpeername())
 
-    send_message(client_socket, "Your name: {}\n".format(users[-1].name))
+    send_message(client_socket, f"Your name: {new_user.name}\n")
     send_message_history(client_socket)
-    handler = Handler(get_message, [client_socket])
-    selector.register(client_socket, EVENT_READ, data=handler)
+
+    handler = _Handler(_get_message, [client_socket])
+    _selector.register(client_socket, EVENT_READ, data=handler)
 
 
-def generate_name() -> str:
-    return names_list.pop()
+def _generate_name() -> str:
+    """
+    Generate a random name.
+
+    :return: generated name
+    """
+    return _names_list.pop()
 
 
-def get_user(client_socket: socket.socket) -> User:
+def get_user(client_socket: socket) -> User:
+    """
+    Get user from socket.
+
+    User is searched in users
+
+    :param client_socket: socket object for search
+    :raises: ValueError if user doesn't exist
+    :return: searched user or None
+    """
     for user in users:
         if user.client_socket == client_socket:
             return user
+    else:
+        raise ValueError("No user found")
 
 
-def get_message(client_socket: socket.socket) -> None:
+def del_user(user: User) -> None:
+    """
+    Delete user.
+
+    Deletes user from users, returns name in _names_list, and closed client
+    socket
+    """
+    users.remove(user)
+    _names_list.insert(0, user.name)
+    user.client_socket.close()
+
+
+def _get_message(client_socket: socket) -> None:
     message_str = client_socket.recv(4096)
 
     if not message_str:
-        selector.unregister(client_socket)
+        _selector.unregister(client_socket)
+
         user = get_user(client_socket)
-        users.remove(user)
-        user.del_self()
+        if user:
+            del_user(user)
+
         client_socket.close()
-        logging.info("Client disconnected. Places left: {}".format(len(names_list)))
+
+        logging.info("Client disconnected. Places left: %d", len(_names_list))
     else:
         user = get_user(client_socket)
+        if not user:
+            return
+
         message = Message(message_str.decode(), user)
         message_history.append(message)
-        for u in users:
-            send_message(u.client_socket, "{}:{}".format(user.name, str(message_str.decode())))
+
+        for user_in_list in users:
+            send_message(
+                user_in_list.client_socket,
+                f"{user.name}:{message_str.decode()}"
+            )
 
         logging.info("Message got")
 
 
-def send_message(client_socket: socket.socket, message: str):
+def send_message(client_socket: socket, message: str) -> None:
+    """
+    Send message to client.
+
+    :param client_socket: client for getting message.
+    :param message: message to send
+    :return: None
+    """
     client_socket.send(message.encode())
 
 
-def send_message_history(client_socket: socket.socket):
+def send_message_history(client_socket: socket) -> None:
+    """
+    Send message history to client.
+
+    :param client_socket: client for getting message history
+    :return: None
+    """
     for message in message_history:
-        send_message(client_socket, "{}:{}".format(message.sender.name, message.body))
+        send_message(client_socket, f"{message.sender.name}:{message.body}")
 
 
-def event_loop():
+def event_loop() -> None:
+    """
+    Run event loop.
+
+    :return: None
+    """
     while True:
-        keys = selector.select()
+        keys = _selector.select()
 
         for key, _ in keys:
             func = key.data.function
             func(*key.data.args)
 
 
-selector.register(server_socket, EVENT_READ, data=Handler(accept_connection, None))
-event_loop()
+if __name__ == "__main__":
+    SERVER_SOCKET.bind(("0.0.0.0", PORT))
+    SERVER_SOCKET.listen(COUNT_OF_CLIENTS)
+
+    logging.basicConfig(level=logging.INFO)
+
+    logging.info("Server is listening on port %d", PORT)
+    logging.info("Server can accept %s connections", COUNT_OF_CLIENTS)
+
+    _selector.register(
+        SERVER_SOCKET,
+        EVENT_READ,
+        data=_Handler(_accept_connection, [])
+    )
+
+    event_loop()
