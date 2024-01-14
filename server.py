@@ -39,7 +39,6 @@ message_history: list["Message"] = []
 
 connection_selector = DefaultSelector()
 get_message_selector = DefaultSelector()
-send_message_selector = DefaultSelector()
 
 
 @dataclass
