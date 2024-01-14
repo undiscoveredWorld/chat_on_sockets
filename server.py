@@ -37,7 +37,9 @@ _names_list: list[str] = ["John", "Jill", "Smith", "Bella"]
 users: list["User"] = []
 message_history: list["Message"] = []
 
-_selector = DefaultSelector()
+connection_selector = DefaultSelector()
+get_message_selector = DefaultSelector()
+send_message_selector = DefaultSelector()
 
 
 @dataclass
@@ -103,7 +105,7 @@ def check_free_positions() -> bool:
     return len(_names_list) != 0
 
 
-def _accept_connection() -> None:
+def _accept_connection():
     """
     Accept connection from client, send message history to it.
 
@@ -115,25 +117,29 @@ def _accept_connection() -> None:
 
     :return:
     """
-    client_socket: socket
-    client_socket, _ = SERVER_SOCKET.accept()
+    while True:
+        yield
 
-    if not check_free_positions():
-        send_message(client_socket, "Server is full. You will disconnect\n")
-        logging.info("Got new connection, but server is full")
-        client_socket.close()
-        return
+        client_socket: socket
+        client_socket, _ = SERVER_SOCKET.accept()
 
-    new_user = User(client_socket)
-    users.append(new_user)
-    logging.info("Accepted new connection. Places left: %d", len(_names_list))
-    logging.info("%s:%d connected", *client_socket.getpeername())
+        if not check_free_positions():
+            send_message(client_socket, "Server is full. You will disconnect\n")
+            logging.info("Got new connection, but server is full")
+            client_socket.close()
+            continue
 
-    send_message(client_socket, f"Your name: {new_user.name}\n")
-    send_message_history(client_socket)
+        new_user = User(client_socket)
+        users.append(new_user)
+        logging.info("Accepted new connection. Places left: %d", len(_names_list))
+        logging.info("%s:%d connected", *client_socket.getpeername())
 
-    handler = _Handler(_get_message, [client_socket])
-    _selector.register(client_socket, EVENT_READ, data=handler)
+        send_message(client_socket, f"Your name: {new_user.name}\n")
+        send_message_history(client_socket)
+
+        get_message = _get_message(client_socket)
+        handler = _Handler(next, [get_message])
+        get_message_selector.register(client_socket, EVENT_READ, data=handler)
 
 
 def _generate_name() -> str:
@@ -174,23 +180,25 @@ def del_user(user: User) -> None:
     user.client_socket.close()
 
 
-def _get_message(client_socket: socket) -> None:
-    message_str = client_socket.recv(4096)
+def _get_message(client_socket: socket):
+    while True:
+        yield
+        message_str = client_socket.recv(4096)
 
-    if not message_str:
-        _selector.unregister(client_socket)
+        if not message_str:
+            get_message_selector.unregister(client_socket)
 
-        user = get_user(client_socket)
-        if user:
-            del_user(user)
+            user = get_user(client_socket)
+            if user:
+                del_user(user)
 
-        client_socket.close()
+            client_socket.close()
 
-        logging.info("Client disconnected. Places left: %d", len(_names_list))
-    else:
-        user = get_user(client_socket)
-        if not user:
-            return
+            logging.info("Client disconnected. Places left: %d", len(_names_list))
+        else:
+            user = get_user(client_socket)
+            if not user:
+                return
 
         message = Message(message_str.decode(), user)
         message_history.append(message)
@@ -233,9 +241,13 @@ def event_loop() -> None:
     :return: None
     """
     while True:
-        keys = _selector.select()
+        connection_keys = connection_selector.select(0.5)
+        for key, _ in connection_keys:
+            func = key.data.function
+            func(*key.data.args)
 
-        for key, _ in keys:
+        get_message_keys = get_message_selector.select(1)
+        for key, _ in get_message_keys:
             func = key.data.function
             func(*key.data.args)
 
@@ -249,10 +261,12 @@ if __name__ == "__main__":
     logging.info("Server is listening on port %d", PORT)
     logging.info("Server can accept %s connections", COUNT_OF_CLIENTS)
 
-    _selector.register(
+    accept = _accept_connection()
+
+    connection_selector.register(
         SERVER_SOCKET,
         EVENT_READ,
-        data=_Handler(_accept_connection, [])
+        data=_Handler(next, [accept])
     )
 
     event_loop()
